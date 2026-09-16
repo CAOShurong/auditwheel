@@ -278,6 +278,17 @@ def test_no_json_flag_uses_text_output(tmp_path, capsys, patch_wheel_abi):
     assert "platform tag" in out
 
 
+def test_text_output_warns_about_executable_stack(tmp_path, capsys, patch_wheel_abi):
+    wheel = tmp_path / "foo-1.0-cp39-cp39-linux_x86_64.whl"
+    wheel.write_text("")
+    patch_wheel_abi(return_value=_make_winfo(executable_stack_linux=True))
+
+    retval = execute(_make_args(wheel, use_json=False), argparse.ArgumentParser())
+
+    assert retval == 0
+    assert "contains ELF files that require an executable stack" in capsys.readouterr().out
+
+
 def test_json_with_sym_policy_constraint(tmp_path, capsys, patch_wheel_abi):
     wheel = tmp_path / "foo-1.0-cp39-cp39-linux_x86_64.whl"
     wheel.write_text("")
