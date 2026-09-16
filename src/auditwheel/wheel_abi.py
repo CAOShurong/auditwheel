@@ -305,6 +305,44 @@ def get_external_libs(external_refs: dict[str, ExternalReference]) -> dict[Path,
     return result
 
 
+def _get_executable_stack_policy(
+    policies: WheelPolicies,
+    external_refs: dict[str, ExternalReference],
+    *,
+    wheel_has_executable_stack: bool,
+    allow_graft: bool,
+) -> Policy:
+    if wheel_has_executable_stack:
+        return policies.linux
+    if not allow_graft:
+        return policies.highest
+
+    executable_stack_by_path = {
+        path: False
+        for external_ref in external_refs.values()
+        for path in external_ref.libs.values()
+        if path is not None
+    }
+    for path, elf in elf_file_filter(executable_stack_by_path):
+        executable_stack_by_path[path] = elf_has_executable_stack(elf)
+
+    # External references vary by policy. Only reject a policy when one of the
+    # libraries that would actually be grafted for that policy needs an
+    # executable stack.
+    return max(
+        (
+            external_ref.policy
+            for external_ref in external_refs.values()
+            if all(
+                not executable_stack_by_path[path]
+                for path in external_ref.libs.values()
+                if path is not None
+            )
+        ),
+        default=policies.linux,
+    )
+
+
 def get_versioned_symbols(libs: dict[Path, str]) -> dict[str, dict[str, set[str]]]:
     """Get versioned symbols used in libraries
     :param libs: {realpath: soname} dict to search for versioned symbols e.g.
@@ -527,7 +565,12 @@ def analyze_wheel_abi(
 
     ucs_policy = policies.linux if data.uses_ucs2_symbols else policies.highest
     pyfpe_policy = policies.linux if data.uses_pyfpe_jbuf else policies.highest
-    executable_stack_policy = policies.linux if data.executable_stack else policies.highest
+    executable_stack_policy = _get_executable_stack_policy(
+        policies,
+        external_refs,
+        wheel_has_executable_stack=bool(data.executable_stack),
+        allow_graft=allow_graft,
+    )
 
     overall_policy = min(
         symbol_policy,

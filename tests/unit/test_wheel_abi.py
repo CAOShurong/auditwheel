@@ -106,6 +106,73 @@ def test_get_symbol_policies() -> None:
     assert max_policy.name == "manylinux_2_17_x86_64"
 
 
+def test_get_executable_stack_policy_for_grafted_libraries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policies = WheelPolicies(libc=Libc.GLIBC, arch=Architecture.x86_64)
+    safe_policy = policies.get_policy_by_name("manylinux_2_17_x86_64")
+    executable_stack_lib = Path("/lib/libunsafe.so")
+    external_refs = {
+        policy.name: ExternalReference(
+            {"libunsafe.so": executable_stack_lib} if policy > safe_policy else {},
+            {},
+            policy,
+        )
+        for policy in policies
+    }
+    monkeypatch.setattr(
+        wheel_abi,
+        "elf_file_filter",
+        lambda paths: ((path, pretend.stub()) for path in paths),
+    )
+    monkeypatch.setattr(wheel_abi, "elf_has_executable_stack", lambda _elf: True)
+
+    assert (
+        wheel_abi._get_executable_stack_policy(
+            policies,
+            external_refs,
+            wheel_has_executable_stack=False,
+            allow_graft=True,
+        )
+        == safe_policy
+    )
+    assert (
+        wheel_abi._get_executable_stack_policy(
+            policies,
+            external_refs,
+            wheel_has_executable_stack=False,
+            allow_graft=False,
+        )
+        == policies.highest
+    )
+
+    monkeypatch.setattr(wheel_abi, "elf_has_executable_stack", lambda _elf: False)
+    assert (
+        wheel_abi._get_executable_stack_policy(
+            policies,
+            external_refs,
+            wheel_has_executable_stack=False,
+            allow_graft=True,
+        )
+        == policies.highest
+    )
+
+
+@pytest.mark.parametrize("allow_graft", [False, True])
+def test_get_executable_stack_policy_for_wheel_files(allow_graft: bool) -> None:
+    policies = WheelPolicies(libc=Libc.GLIBC, arch=Architecture.x86_64)
+
+    assert (
+        wheel_abi._get_executable_stack_policy(
+            policies,
+            {},
+            wheel_has_executable_stack=True,
+            allow_graft=allow_graft,
+        )
+        == policies.linux
+    )
+
+
 @pytest.mark.parametrize("kind", ["resolved", "unresolved", "warning"])
 def test_nonpy_elf_resolution(kind: str, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING)
