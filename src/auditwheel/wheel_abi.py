@@ -48,6 +48,7 @@ class WheelAbIInfo:
     machine_policy: Policy
     executable_stack_policy: Policy
     graft_policy: Policy
+    unknown_executable_stack: list[Path]
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ class WheelElfData:
     uses_ucs2_symbols: bool
     uses_pyfpe_jbuf: bool
     executable_stack: list[Path]
+    unknown_executable_stack: list[Path]
 
 
 def _fixup_elf_trees(
@@ -135,6 +137,7 @@ def get_wheel_elfdata(
     uses_ucs2_symbols = False
     uses_pyfpe_jbuf = False
     executable_stack = []
+    unknown_executable_stack = []
     policies: WheelPolicies | None = None
 
     # Android is cross-compiled, so ldpaths should never be loaded from the build machine.
@@ -147,7 +150,15 @@ def get_wheel_elfdata(
 
         platform_wheel = False
         for fn, elf in elf_file_filter(ctx.iter_files()):
-            if elf_has_executable_stack(elf):
+            stack_requirement = elf_has_executable_stack(elf)
+            if stack_requirement is None:
+                unknown_executable_stack.append(fn)
+                log.warning(
+                    "ELF file %r has no PT_GNU_STACK; stack executability is unknown "
+                    "and depends on the target loader and architecture",
+                    fn,
+                )
+            elif stack_requirement:
                 executable_stack.append(fn)
             # Check for invalid binary wheel format: no shared library should
             # be found in purelib
@@ -283,6 +294,7 @@ def get_wheel_elfdata(
         uses_ucs2_symbols,
         uses_pyfpe_jbuf,
         executable_stack,
+        unknown_executable_stack,
     )
 
 
@@ -317,7 +329,7 @@ def _get_executable_stack_policy(
     if not allow_graft:
         return policies.highest
 
-    executable_stack_by_path = {
+    executable_stack_by_path: dict[Path, bool | None] = {
         path: False
         for external_ref in external_refs.values()
         for path in external_ref.libs.values()
@@ -325,6 +337,12 @@ def _get_executable_stack_policy(
     }
     for path, elf in elf_file_filter(executable_stack_by_path):
         executable_stack_by_path[path] = elf_has_executable_stack(elf)
+        if executable_stack_by_path[path] is None:
+            log.warning(
+                "External ELF file %r has no PT_GNU_STACK; stack executability is unknown "
+                "and depends on the target loader and architecture",
+                path,
+            )
 
     # External references vary by policy. Only reject a policy when one of the
     # libraries that would actually be grafted for that policy needs an
@@ -334,7 +352,7 @@ def _get_executable_stack_policy(
             external_ref.policy
             for external_ref in external_refs.values()
             if all(
-                not executable_stack_by_path[path]
+                executable_stack_by_path[path] is not True
                 for path in external_ref.libs.values()
                 if path is not None
             )
@@ -601,6 +619,7 @@ def analyze_wheel_abi(
         machine_policy,
         executable_stack_policy,
         graft_policy,
+        data.unknown_executable_stack,
     )
 
 

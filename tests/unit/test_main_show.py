@@ -67,6 +67,7 @@ def _make_winfo(
     ucs_linux: bool = False,
     machine_linux: bool = False,
     executable_stack_linux: bool = False,
+    unknown_executable_stack: bool = False,
     versioned_symbols: dict[str, set[str]] | None = None,
     external_libs: dict[str, Path | None] | None = None,
     policy_upgrades_libs: dict[str, Path | None] | None = None,
@@ -93,6 +94,7 @@ def _make_winfo(
         ucs_policy=LINUX if ucs_linux else MANYLINUX_2_17,
         machine_policy=LINUX if machine_linux else MANYLINUX_2_17,
         executable_stack_policy=LINUX if executable_stack_linux else MANYLINUX_2_17,
+        unknown_executable_stack=[Path("unknown.so")] if unknown_executable_stack else [],
         sym_policy=overall_policy,
         versioned_symbols=versioned_symbols or {},
         external_refs=external_refs,
@@ -287,6 +289,32 @@ def test_text_output_warns_about_executable_stack(tmp_path, capsys, patch_wheel_
 
     assert retval == 0
     assert "contains ELF files that require an executable stack" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("explicit_request", [False, True])
+def test_json_executable_stack_unknown(tmp_path, capsys, patch_wheel_abi, explicit_request):
+    wheel = tmp_path / "foo-1.0-cp39-cp39-linux_x86_64.whl"
+    wheel.touch()
+    patch_wheel_abi(
+        return_value=_make_winfo(
+            executable_stack_linux=explicit_request,
+            unknown_executable_stack=True,
+        ),
+    )
+
+    assert execute(_make_args(wheel, use_json=True), argparse.ArgumentParser()) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["executable_stack"] is (True if explicit_request else None)
+    _validate_json(output)
+
+
+def test_text_output_warns_about_unknown_stack(tmp_path, capsys, patch_wheel_abi):
+    wheel = tmp_path / "foo-1.0-cp39-cp39-linux_x86_64.whl"
+    wheel.touch()
+    patch_wheel_abi(return_value=_make_winfo(unknown_executable_stack=True))
+
+    assert execute(_make_args(wheel, use_json=False), argparse.ArgumentParser()) == 0
+    assert "Stack executability is unknown" in " ".join(capsys.readouterr().out.split())
 
 
 def test_json_with_sym_policy_constraint(tmp_path, capsys, patch_wheel_abi):

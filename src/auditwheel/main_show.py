@@ -66,7 +66,13 @@ def _output_json(fn: str, winfo: WheelAbIInfo) -> None:
         "pyfpe": winfo.pyfpe_policy == policies.linux,
         "ucs2": winfo.ucs_policy == policies.linux,
         "unsupported_isa": winfo.machine_policy == policies.linux,
-        "executable_stack": winfo.executable_stack_policy == policies.linux,
+        "executable_stack": (
+            True
+            if winfo.executable_stack_policy == policies.linux
+            else None
+            if winfo.unknown_executable_stack
+            else False
+        ),
         "versioned_symbols": {k: sorted(v) for k, v in sorted(winfo.versioned_symbols.items())},
         "external_libs": {str(k): str(v) if v else None for k, v in sorted(libs.items())},
         "policy_upgrades": policy_upgrades,
@@ -133,6 +139,12 @@ def execute(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     printp(
         f'{fn} is consistent with the following platform tag: "{winfo.overall_policy.name}".',
     )
+
+    if winfo.unknown_executable_stack:
+        printp(
+            "This wheel contains ELF files without PT_GNU_STACK. Stack executability is "
+            "unknown and depends on the target loader and architecture.",
+        )
 
     if winfo.pyfpe_policy == policies.linux:
         printp(

@@ -63,8 +63,8 @@
           "description": "Whether the wheel depends on unsupported ISA extensions."
         },
         "executable_stack": {
-          "type": "boolean",
-          "description": "Whether the wheel contains ELF files that require an executable stack."
+          "type": ["boolean", "null"],
+          "description": "Whether any ELF file in the wheel explicitly requests an executable stack. Null means no explicit request was found but at least one ELF file lacks PT_GNU_STACK, so its stack requirement is unknown."
         },
         "versioned_symbols": {
           "type": "object",

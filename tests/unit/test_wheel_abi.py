@@ -159,6 +159,49 @@ def test_get_executable_stack_policy_for_grafted_libraries(
 
 
 @pytest.mark.parametrize("allow_graft", [False, True])
+@pytest.mark.parametrize("stack_requirement", [False, None, True])
+def test_grafted_library_stack_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    allow_graft: bool,
+    stack_requirement: bool | None,
+) -> None:
+    policies = WheelPolicies(libc=Libc.GLIBC, arch=Architecture.x86_64)
+    safe_policy = policies.get_policy_by_name("manylinux_2_17_x86_64")
+    library = Path("/lib/libexample.so")
+    external_refs = {
+        policy.name: ExternalReference(
+            {"libexample.so": library} if policy > safe_policy else {},
+            {},
+            policy,
+        )
+        for policy in policies
+    }
+    scanned = []
+
+    def scan(paths):
+        for path in paths:
+            scanned.append(path)
+            yield path, pretend.stub()
+
+    monkeypatch.setattr(wheel_abi, "elf_file_filter", scan)
+    monkeypatch.setattr(wheel_abi, "elf_has_executable_stack", lambda _elf: stack_requirement)
+
+    policy = wheel_abi._get_executable_stack_policy(
+        policies,
+        external_refs,
+        wheel_has_executable_stack=False,
+        allow_graft=allow_graft,
+    )
+    assert policy == (
+        safe_policy if allow_graft and stack_requirement is True else policies.highest
+    )
+    assert scanned == ([library] if allow_graft else [])
+    warnings = [record for record in caplog.records if "no PT_GNU_STACK" in record.message]
+    assert len(warnings) == (1 if allow_graft and stack_requirement is None else 0)
+
+
+@pytest.mark.parametrize("allow_graft", [False, True])
 def test_get_executable_stack_policy_for_wheel_files(allow_graft: bool) -> None:
     policies = WheelPolicies(libc=Libc.GLIBC, arch=Architecture.x86_64)
 
